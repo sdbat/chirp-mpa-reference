@@ -111,12 +111,23 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		fmt.Println(".")
 
 		//Append this time of flight to the output data set
+		//For more "real" implementations, this would likely
+		//be a rolling-window smoothed time of flight. You do not have
+		//to base this value on just the data from this set and
+		//you do not have to emit every time either (downsampling is ok)
 		odata.Tofs = append(odata.Tofs, l7g.TOFMeasure{
 			Src: int(h.Primary),
 			Dst: set,
 			Val: tof * 1000000,
 		})
 	} //end for each of the four measurements
+
+	// Now we would also emit the velocities. I imagine this would use
+	// the averaged/corrected time of flights that are emitted above
+	// (when they are actually averaged/corrected)
+	// For now, just a placeholder
+	odata.Velocities = append(odata.Velocities, l7g.VelocityMeasure{X: 42, Y: 43, Z: 44})
+
 	//Emit the data on the SASC bus
 	emit.Data(odata)
 }
