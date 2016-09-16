@@ -12,6 +12,7 @@ import (
 var lastNotify time.Time
 
 func main() {
+	lastNotify = time.Now()
 	l7g.RunDPA(Initialize, OnNewData, "mpa", "reference_1_0")
 }
 
