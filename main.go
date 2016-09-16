@@ -4,9 +4,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"time"
 
 	l7g "github.com/immesys/chirp-l7g"
 )
+
+var lastNotify time.Time
 
 func main() {
 	l7g.RunDPA(Initialize, OnNewData, "mpa", "reference_1_0")
@@ -127,6 +130,12 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	// (when they are actually averaged/corrected)
 	// For now, just a placeholder
 	odata.Velocities = append(odata.Velocities, l7g.VelocityMeasure{X: 42, Y: 43, Z: 44})
+
+	// You can also add some extra data here, maybe intermittently like
+	if time.Now().Sub(lastNotify) > 5*time.Second {
+		odata.Extradata = append(odata.Extradata, fmt.Sprintf("anemometer %s build is %d", popHdr.Srcmac, h.Build))
+		lastNotify = time.Now()
+	}
 
 	//Emit the data on the SASC bus
 	emit.Data(odata)
