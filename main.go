@@ -100,19 +100,19 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		tof := (lerp_idx + float64(magic_count_tx)) / freq * 8
 
 		//We print these just for fun / debugging, but this is not actually emitting the data
-		fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
-		fmt.Println("lerp_idx: ", lerp_idx)
-		fmt.Println("tof_sf: ", tof_sf)
-		fmt.Println("freq: ", freq)
-		fmt.Printf("tof: %.2f us\n", tof*1000000)
-		fmt.Println("intensity: ", intensity)
-		fmt.Println("tof chip estimate: ", tof_est)
-		fmt.Println("tof 50us estimate: ", lerp_idx*50)
-		fmt.Println("data: ")
-		for i := 0; i < 16; i++ {
-			fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
-		}
-		fmt.Println(".")
+		// fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
+		// fmt.Println("lerp_idx: ", lerp_idx)
+		// fmt.Println("tof_sf: ", tof_sf)
+		// fmt.Println("freq: ", freq)
+		// fmt.Printf("tof: %.2f us\n", tof*1000000)
+		// fmt.Println("intensity: ", intensity)
+		// fmt.Println("tof chip estimate: ", tof_est)
+		// fmt.Println("tof 50us estimate: ", lerp_idx*50)
+		// fmt.Println("data: ")
+		// for i := 0; i < 16; i++ {
+		// 	fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
+		// }
+		// fmt.Println(".")
 
 		//Append this time of flight to the output data set
 		//For more "real" implementations, this would likely
