@@ -98,7 +98,8 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		lerp_idx := float64(less_idx) + (half_val-less_val)/(greater_val-less_val)
 		//Fudge the result with magic_count_tx and turn into time of flight
 		tof := (lerp_idx + float64(magic_count_tx)) / freq * 8
-
+    _=tof_est
+    _=intensity
 		//We print these just for fun / debugging, but this is not actually emitting the data
 		// fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
 		// fmt.Println("lerp_idx: ", lerp_idx)
