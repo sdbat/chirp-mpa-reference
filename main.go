@@ -30,7 +30,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	// Define some magic constants for the algorithm
 	magic_count_tx := -4
 
-	fmt.Printf("Device id: %s\n" popHdr.Srcmac)
+	fmt.Printf("Device id: %s\n", popHdr.Srcmac)
 	// Create our output data set. For this reference implementation,
 	// we emit one TOF measurement for every raw TOF sample (no averaging)
 	// so the timestamp is simply the raw timestamp obtained from the
