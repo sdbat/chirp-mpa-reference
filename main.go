@@ -21,6 +21,8 @@ func Initialize(emit l7g.Emitter) {
 	//you want to, you can do it here.
 }
 
+//type rawVelocityMatrix
+
 // OnNewData encapsulates the algorithm. You can store the emitter and
 // use it asynchronously if required. You can see the documentation for the
 // parameters at https://godoc.org/github.com/immesys/chirp-l7g
@@ -28,6 +30,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	// Define some magic constants for the algorithm
 	magic_count_tx := -4
 
+	fmt.Printf("Device id: %s\n" popHdr.Srcmac)
 	// Create our output data set. For this reference implementation,
 	// we emit one TOF measurement for every raw TOF sample (no averaging)
 	// so the timestamp is simply the raw timestamp obtained from the
@@ -101,19 +104,19 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
     _=tof_est
     _=intensity
 		//We print these just for fun / debugging, but this is not actually emitting the data
-		// fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
-		// fmt.Println("lerp_idx: ", lerp_idx)
-		// fmt.Println("tof_sf: ", tof_sf)
-		// fmt.Println("freq: ", freq)
-		// fmt.Printf("tof: %.2f us\n", tof*1000000)
-		// fmt.Println("intensity: ", intensity)
-		// fmt.Println("tof chip estimate: ", tof_est)
-		// fmt.Println("tof 50us estimate: ", lerp_idx*50)
-		// fmt.Println("data: ")
-		// for i := 0; i < 16; i++ {
-		// 	fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
-		// }
-		// fmt.Println(".")
+		 fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
+		 fmt.Println("lerp_idx: ", lerp_idx)
+		 fmt.Println("tof_sf: ", tof_sf)
+		 fmt.Println("freq: ", freq)
+		 fmt.Printf("tof: %.2f us\n", tof*1000000)
+		 fmt.Println("intensity: ", intensity)
+		 fmt.Println("tof chip estimate: ", tof_est)
+		 fmt.Println("tof 50us estimate: ", lerp_idx*50)
+		 fmt.Println("data: ")
+		 for i := 0; i < 16; i++ {
+		 	fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
+		 }
+		 fmt.Println(".")
 
 		//Append this time of flight to the output data set
 		//For more "real" implementations, this would likely
