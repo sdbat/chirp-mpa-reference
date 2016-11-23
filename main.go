@@ -11,17 +11,95 @@ import (
 
 var lastNotify time.Time
 
+mra := make(map[string]*room_anemometer)
+
 func main() {
 	lastNotify = time.Now()
-	l7g.RunDPA(Initialize, OnNewData, "mpa", "reference_1_0")
+	l7g.RunDPA(Initialize, OnNewData, "chirpmicro", "reference_1_1")
 }
+
+type room_anemometer struct {
+	//map the port number to the matrix index
+	port_to_idx [4]int
+	//separation between parts in terms of index in microns
+	s_matrix [4][4]float32
+	//tofs in microseconds
+	tof_matrix [4][4]float32
+	//component velocities in m/s
+	vel_matrix [4][4]float32
+	//scale factors from components to cardinal
+	vx_scales [4][4]float32
+	vy_scales [4][4]float32
+	vz_scales [4][4]float32
+	//raw cardinal velocities m/s
+	vxyz_raw [3]float32
+	//stored offset values
+	vxyz_offset [3]float32
+	//calibrated velocities
+	vxyz_cal [3]float32
+	//filtered result, output to application
+	vxyz_filt [3]float32
+	//number of received samples
+	num_samples int
+}
+
+func (mat *[4][4]float32) flip_diag() {
+	for i := 0; i < 4; i++ {
+		for j := i+1; j < 4; j++ {
+			mat[j][i] = -mat[i][j];
+		}
+	}
+}
+
+func NewRoomAnemometer *room_anemometer() {
+	ra := room_anemometer{}
+	ra.num_samples = 0
+	//initialize port to index according to geometry
+	ra.port_to_idx[0] = 1 //port 0 is B in doc
+	ra.port_to_idx[1] = 3 //port 1 is D
+	ra.port_to_idx[2] = 0 //A
+	ra.port_to_idx[3] = 2 //C
+
+	//initialize s_matrix, tof_matrix.
+	//Other matrixes are already initialized to 0
+	for i := 0; i < 4; i++ {
+		for j := 0; j < 4; j++ {
+			ra.s_matrix[i][j] = 60000.0
+			ra.tof_matrix[i][j] = 174.92
+			if i == j {
+				ra.s_matrix[i][j] = 0.0
+				ra.tof_matrix[i][j] = 1.0e-12 //prevent divide by zero
+			}
+		}
+	}
+	ra.vx_scales[0][2] = math.cos(30 * math.Pi / 180.0)
+	ra.vx_scales[1][2] = math.cos(30 * math.Pi / 180.0)
+	ra.vx_scales[0][3] = math.cos(54.74*math.Pi/180.0) * math.sin(60.0*math.Pi/180.0)
+	ra.vx_scales[1][3] = math.cos(54.74*math.Pi/180.0) * math.sin(60.0*math.Pi/180.0)
+	ra.vx_scales[2][3] = -math.cos(54.74 * math.Pi / 180.0)
+
+	ra.vy_scales[0][1] = 1.0
+	ra.vy_scales[0][2] = math.sin(30 * math.Pi / 180.0)
+	ra.vy_scales[0][3] = math.cos(54.74*math.Pi/180.0) * math.cos(60.0*math.Pi/180.0)
+	ra.vy_scales[1][2] = -math.sin(30 * math.Pi / 180.0)
+	ra.vy_scales[1][3] = -math.cos(54.74*math.Pi/180.0) * math.cos(60.0*math.Pi/180.0)
+
+	ra.vz_scales[0][3] = math.sin(54.74 * math.Pi / 180.0)
+	ra.vz_scales[1][3] = math.sin(54.74 * math.Pi / 180.0)
+	ra.vz_scales[2][3] = math.sin(54.74 * math.Pi / 180.0)
+	fmt.Println(&ra)
+	ra.vx_scales.flip_diag()
+	ra.vy_scales.flip_diag()
+	ra.vz_scales.flip_diag()
+	return &ra
+}
+
+
 
 func Initialize(emit l7g.Emitter) {
 	//We actually do not do any initialization in this implementation, but if
 	//you want to, you can do it here.
 }
-
-//type rawVelocityMatrix
 
 // OnNewData encapsulates the algorithm. You can store the emitter and
 // use it asynchronously if required. You can see the documentation for the
@@ -31,6 +109,12 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	magic_count_tx := -4
 
 	fmt.Printf("Device id: %s\n", popHdr.Srcmac)
+	ra,ok := mra[popHdr.Srcmac]
+	if ok==0 {
+		fmt.Printf("No key for: %s, creating new RA\n", popHdr.Srcmac)
+		mra[popHdr.Srcmac] = NewRoomAnemometer()
+		ra = mra[popHdr.Srcmac]
+	}
 	// Create our output data set. For this reference implementation,
 	// we emit one TOF measurement for every raw TOF sample (no averaging)
 	// so the timestamp is simply the raw timestamp obtained from the
@@ -101,22 +185,22 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		lerp_idx := float64(less_idx) + (half_val-less_val)/(greater_val-less_val)
 		//Fudge the result with magic_count_tx and turn into time of flight
 		tof := (lerp_idx + float64(magic_count_tx)) / freq * 8
-    _=tof_est
-    _=intensity
+		_ = tof_est
+		_ = intensity
 		//We print these just for fun / debugging, but this is not actually emitting the data
-		 fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
-		 fmt.Println("lerp_idx: ", lerp_idx)
-		 fmt.Println("tof_sf: ", tof_sf)
-		 fmt.Println("freq: ", freq)
-		 fmt.Printf("tof: %.2f us\n", tof*1000000)
-		 fmt.Println("intensity: ", intensity)
-		 fmt.Println("tof chip estimate: ", tof_est)
-		 fmt.Println("tof 50us estimate: ", lerp_idx*50)
-		 fmt.Println("data: ")
-		 for i := 0; i < 16; i++ {
-		 	fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
-		 }
-		 fmt.Println(".")
+		fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
+		fmt.Println("lerp_idx: ", lerp_idx)
+		fmt.Println("tof_sf: ", tof_sf)
+		fmt.Println("freq: ", freq)
+		fmt.Printf("tof: %.2f us\n", tof*1000000)
+		fmt.Println("intensity: ", intensity)
+		fmt.Println("tof chip estimate: ", tof_est)
+		fmt.Println("tof 50us estimate: ", lerp_idx*50)
+		fmt.Println("data: ")
+		for i := 0; i < 16; i++ {
+			fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
+		}
+		fmt.Println(".")
 
 		//Append this time of flight to the output data set
 		//For more "real" implementations, this would likely
