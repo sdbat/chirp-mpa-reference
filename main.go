@@ -11,7 +11,7 @@ import (
 
 var lastNotify time.Time
 
-mra := make(map[string]*room_anemometer)
+var mra = make(map[string]*room_anemometer)
 
 func main() {
 	lastNotify = time.Now()
@@ -43,15 +43,8 @@ type room_anemometer struct {
 	num_samples int
 }
 
-func (mat *[4][4]float32) flip_diag() {
-	for i := 0; i < 4; i++ {
-		for j := i+1; j < 4; j++ {
-			mat[j][i] = -mat[i][j];
-		}
-	}
-}
 
-func NewRoomAnemometer *room_anemometer() {
+func NewRoomAnemometer() *room_anemometer {
 	ra := room_anemometer{}
 	ra.num_samples = 0
 	//initialize port to index according to geometry
@@ -72,25 +65,29 @@ func NewRoomAnemometer *room_anemometer() {
 			}
 		}
 	}
-	ra.vx_scales[0][2] = math.cos(30 * math.Pi / 180.0)
-	ra.vx_scales[1][2] = math.cos(30 * math.Pi / 180.0)
-	ra.vx_scales[0][3] = math.cos(54.74*math.Pi/180.0) * math.sin(60.0*math.Pi/180.0)
-	ra.vx_scales[1][3] = math.cos(54.74*math.Pi/180.0) * math.sin(60.0*math.Pi/180.0)
-	ra.vx_scales[2][3] = -math.cos(54.74 * math.Pi / 180.0)
+	ra.vx_scales[0][2] = float32(math.Cos(30 * math.Pi / 180.0))
+	ra.vx_scales[1][2] = float32(math.Cos(30 * math.Pi / 180.0))
+	ra.vx_scales[0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
+	ra.vx_scales[1][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
+	ra.vx_scales[2][3] = float32(-math.Cos(54.74 * math.Pi / 180.0))
 
 	ra.vy_scales[0][1] = 1.0
-	ra.vy_scales[0][2] = math.sin(30 * math.Pi / 180.0)
-	ra.vy_scales[0][3] = math.cos(54.74*math.Pi/180.0) * math.cos(60.0*math.Pi/180.0)
-	ra.vy_scales[1][2] = -math.sin(30 * math.Pi / 180.0)
-	ra.vy_scales[1][3] = -math.cos(54.74*math.Pi/180.0) * math.cos(60.0*math.Pi/180.0)
+	ra.vy_scales[0][2] = float32(math.Sin(30 * math.Pi / 180.0))
+	ra.vy_scales[0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
+	ra.vy_scales[1][2] = float32(-math.Sin(30 * math.Pi / 180.0))
+	ra.vy_scales[1][3] = float32(-math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
 
-	ra.vz_scales[0][3] = math.sin(54.74 * math.Pi / 180.0)
-	ra.vz_scales[1][3] = math.sin(54.74 * math.Pi / 180.0)
-	ra.vz_scales[2][3] = math.sin(54.74 * math.Pi / 180.0)
-	fmt.Println(&ra)
-	ra.vx_scales.flip_diag()
-	ra.vy_scales.flip_diag()
-	ra.vz_scales.flip_diag()
+	ra.vz_scales[0][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.vz_scales[1][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.vz_scales[2][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+
+	for i := 0; i < 4; i++ {
+		for j := i+1; j < 4; j++ {
+			ra.vx_scales[j][i] = -ra.vx_scales[i][j];
+			ra.vy_scales[j][i] = -ra.vy_scales[i][j];
+			ra.vz_scales[j][i] = -ra.vz_scales[i][j];
+		}
+	}
 	return &ra
 }
 
@@ -110,11 +107,13 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 
 	fmt.Printf("Device id: %s\n", popHdr.Srcmac)
 	ra,ok := mra[popHdr.Srcmac]
-	if ok==0 {
+	if ok==false {
 		fmt.Printf("No key for: %s, creating new RA\n", popHdr.Srcmac)
 		mra[popHdr.Srcmac] = NewRoomAnemometer()
 		ra = mra[popHdr.Srcmac]
+		fmt.Println(ra)
 	}
+
 	// Create our output data set. For this reference implementation,
 	// we emit one TOF measurement for every raw TOF sample (no averaging)
 	// so the timestamp is simply the raw timestamp obtained from the
@@ -124,7 +123,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		Timestamp: popHdr.Brtime,
 		Sensor:    popHdr.Srcmac,
 	}
-
+	toprint := false
 	// For each of the four measurements in the data set
 	for set := 0; set < 4; set++ {
 		// For now, ignore the data read from the ASIC in TXRX
@@ -187,20 +186,23 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		tof := (lerp_idx + float64(magic_count_tx)) / freq * 8
 		_ = tof_est
 		_ = intensity
-		//We print these just for fun / debugging, but this is not actually emitting the data
-		fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
-		fmt.Println("lerp_idx: ", lerp_idx)
-		fmt.Println("tof_sf: ", tof_sf)
-		fmt.Println("freq: ", freq)
-		fmt.Printf("tof: %.2f us\n", tof*1000000)
-		fmt.Println("intensity: ", intensity)
-		fmt.Println("tof chip estimate: ", tof_est)
-		fmt.Println("tof 50us estimate: ", lerp_idx*50)
-		fmt.Println("data: ")
-		for i := 0; i < 16; i++ {
-			fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
+		if toprint {
+
+			//We print these just for fun / debugging, but this is not actually emitting the data
+			fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
+			fmt.Println("lerp_idx: ", lerp_idx)
+			fmt.Println("tof_sf: ", tof_sf)
+			fmt.Println("freq: ", freq)
+			fmt.Printf("tof: %.2f us\n", tof*1000000)
+			fmt.Println("intensity: ", intensity)
+			fmt.Println("tof chip estimate: ", tof_est)
+			fmt.Println("tof 50us estimate: ", lerp_idx*50)
+			fmt.Println("data: ")
+			for i := 0; i < 16; i++ {
+				fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
+			}
+			fmt.Println(".")
 		}
-		fmt.Println(".")
 
 		//Append this time of flight to the output data set
 		//For more "real" implementations, this would likely
