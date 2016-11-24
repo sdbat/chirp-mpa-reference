@@ -28,9 +28,9 @@ type room_anemometer struct {
 	//component velocities in m/s
 	vel_matrix [4][4]float32
 	//scale factors from components to cardinal
-	vx_scales [4][4]float32
-	vy_scales [4][4]float32
-	vz_scales [4][4]float32
+	v_scales [3]4][4]float32
+//	vy_scales [4][4]float32
+//	vz_scales [4][4]float32
 	//raw cardinal velocities m/s
 	vxyz_raw [3]float32
 	//stored offset values
@@ -65,33 +65,48 @@ func NewRoomAnemometer() *room_anemometer {
 			}
 		}
 	}
-	ra.vx_scales[0][2] = float32(math.Cos(30 * math.Pi / 180.0))
-	ra.vx_scales[1][2] = float32(math.Cos(30 * math.Pi / 180.0))
-	ra.vx_scales[0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
-	ra.vx_scales[1][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
-	ra.vx_scales[2][3] = float32(-math.Cos(54.74 * math.Pi / 180.0))
+	ra.v_scales[0][0][2] = float32(math.Cos(30 * math.Pi / 180.0))
+	ra.v_scales[0][1][2] = float32(math.Cos(30 * math.Pi / 180.0))
+	ra.v_scales[0][0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
+	ra.v_scales[0][1][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
+	ra.v_scales[0][2][3] = float32(-math.Cos(54.74 * math.Pi / 180.0))
 
-	ra.vy_scales[0][1] = 1.0
-	ra.vy_scales[0][2] = float32(math.Sin(30 * math.Pi / 180.0))
-	ra.vy_scales[0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
-	ra.vy_scales[1][2] = float32(-math.Sin(30 * math.Pi / 180.0))
-	ra.vy_scales[1][3] = float32(-math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
+	ra.v_scales[1][0][1] = 1.0
+	ra.v_scales[1][0][2] = float32(math.Sin(30 * math.Pi / 180.0))
+	ra.v_scales[1][0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
+	ra.v_scales[1][1][2] = float32(-math.Sin(30 * math.Pi / 180.0))
+	ra.v_scales[1][1][3] = float32(-math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
 
-	ra.vz_scales[0][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
-	ra.vz_scales[1][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
-	ra.vz_scales[2][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.v_scales[2][0][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.v_scales[2][1][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.v_scales[2][2][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
 
 	for i := 0; i < 4; i++ {
 		for j := i+1; j < 4; j++ {
-			ra.vx_scales[j][i] = -ra.vx_scales[i][j];
-			ra.vy_scales[j][i] = -ra.vy_scales[i][j];
-			ra.vz_scales[j][i] = -ra.vz_scales[i][j];
+			for k:=0; k<3; k++{
+				ra.v_scales[k][j][i] = -ra.v_scales[k][j][i];
+			}
+//			ra.vx_scales[j][i] = -ra.vx_scales[i][j];
+//			ra.vy_scales[j][i] = -ra.vy_scales[i][j];
+//			ra.vz_scales[j][i] = -ra.vz_scales[i][j];
 		}
 	}
 	return &ra
 }
 
-
+func (ra *room_anemometer) cardinalVelocities() {
+	den := [3]float32{0.0,0.0,0.0}
+	num := [3]float32{0.0,0.0,0.0}
+	for k:=0; k<3; k++{
+		for i:=0; i<4; i++{
+			for j:=0; j<4; j++ {
+				num[k] = num[k] + ra.vel_matrix[i][j]*ra.v_scales[k][i][j]
+				den[k] = den[k] + ra.v_scales[k][i][j]
+			}
+		}
+		ra.vxyz_raw[k] = num[k]/den[k] 
+	}
+}
 
 func Initialize(emit l7g.Emitter) {
 	//We actually do not do any initialization in this implementation, but if
@@ -111,7 +126,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		fmt.Printf("No key for: %s, creating new RA\n", popHdr.Srcmac)
 		mra[popHdr.Srcmac] = NewRoomAnemometer()
 		ra = mra[popHdr.Srcmac]
-		fmt.Println(ra)
+		//fmt.Println(ra)
 	}
 
 	// Create our output data set. For this reference implementation,
@@ -203,6 +218,12 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 			}
 			fmt.Println(".")
 		}
+		txi := ra.port_to_idx[h.Primary]
+		rxi := ra.port_to_idx[set] 
+		ra.tof_matrix[txi][rxi] = float32(tof*1000000.0)
+		ra.vel_matrix[txi][rxi] = 0.5 * (ra.s_matrix[txi][rxi]/ra.tof_matrix[txi][rxi] -
+			ra.s_matrix[rxi][txi]/ra.tof_matrix[rxi][txi])
+		
 
 		//Append this time of flight to the output data set
 		//For more "real" implementations, this would likely
@@ -215,7 +236,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 			Val: tof * 1000000,
 		})
 	} //end for each of the four measurements
-
+	
 	// Now we would also emit the velocities. I imagine this would use
 	// the averaged/corrected time of flights that are emitted above
 	// (when they are actually averaged/corrected)
