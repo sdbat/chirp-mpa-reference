@@ -20,7 +20,7 @@ func main() {
 
 type room_anemometer struct {
 	//map the port number to the matrix index
-	port_to_idx [4]int
+	port_to_idx [4]int32
 	//separation between parts in terms of index in microns
 	s_matrix [4][4]float32
 	//tofs in microseconds
@@ -28,9 +28,9 @@ type room_anemometer struct {
 	//component velocities in m/s
 	vel_matrix [4][4]float32
 	//scale factors from components to cardinal
-	vx_scales [4][4]float32
-	vy_scales [4][4]float32
-	vz_scales [4][4]float32
+	v_scales [3][4][4]float32
+	//	vy_scales [4][4]float32
+	//	vz_scales [4][4]float32
 	//raw cardinal velocities m/s
 	vxyz_raw [3]float32
 	//stored offset values
@@ -40,9 +40,8 @@ type room_anemometer struct {
 	//filtered result, output to application
 	vxyz_filt [3]float32
 	//number of received samples
-	num_samples int
+	num_samples int32
 }
-
 
 func NewRoomAnemometer() *room_anemometer {
 	ra := room_anemometer{}
@@ -65,33 +64,65 @@ func NewRoomAnemometer() *room_anemometer {
 			}
 		}
 	}
-	ra.vx_scales[0][2] = float32(math.Cos(30 * math.Pi / 180.0))
-	ra.vx_scales[1][2] = float32(math.Cos(30 * math.Pi / 180.0))
-	ra.vx_scales[0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
-	ra.vx_scales[1][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
-	ra.vx_scales[2][3] = float32(-math.Cos(54.74 * math.Pi / 180.0))
+	ra.v_scales[0][0][2] = float32(math.Cos(30 * math.Pi / 180.0))
+	ra.v_scales[0][1][2] = float32(math.Cos(30 * math.Pi / 180.0))
+	ra.v_scales[0][0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
+	ra.v_scales[0][1][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
+	ra.v_scales[0][2][3] = float32(-math.Cos(54.74 * math.Pi / 180.0))
 
-	ra.vy_scales[0][1] = 1.0
-	ra.vy_scales[0][2] = float32(math.Sin(30 * math.Pi / 180.0))
-	ra.vy_scales[0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
-	ra.vy_scales[1][2] = float32(-math.Sin(30 * math.Pi / 180.0))
-	ra.vy_scales[1][3] = float32(-math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
+	ra.v_scales[1][0][1] = 1.0
+	ra.v_scales[1][0][2] = float32(math.Sin(30 * math.Pi / 180.0))
+	ra.v_scales[1][0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
+	ra.v_scales[1][1][2] = float32(-math.Sin(30 * math.Pi / 180.0))
+	ra.v_scales[1][1][3] = float32(-math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
 
-	ra.vz_scales[0][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
-	ra.vz_scales[1][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
-	ra.vz_scales[2][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.v_scales[2][0][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.v_scales[2][1][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.v_scales[2][2][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
 
 	for i := 0; i < 4; i++ {
-		for j := i+1; j < 4; j++ {
-			ra.vx_scales[j][i] = -ra.vx_scales[i][j];
-			ra.vy_scales[j][i] = -ra.vy_scales[i][j];
-			ra.vz_scales[j][i] = -ra.vz_scales[i][j];
+		for j := i + 1; j < 4; j++ {
+			for k := 0; k < 3; k++ {
+				ra.v_scales[k][j][i] = -ra.v_scales[k][j][i]
+			}
+			//          ra.vx_scales[j][i] = -ra.vx_scales[i][j];
+			//          ra.vy_scales[j][i] = -ra.vy_scales[i][j];
+			//          ra.vz_scales[j][i] = -ra.vz_scales[i][j];
 		}
 	}
 	return &ra
 }
 
+func (ra *room_anemometer) cardinalVelocities() {
+	den := [3]float32{0.0, 0.0, 0.0}
+	num := [3]float32{0.0, 0.0, 0.0}
+	for k := 0; k < 3; k++ {
+		for i := 0; i < 4; i++ {
+			for j := 0; j < 4; j++ {
+				num[k] = num[k] + ra.vel_matrix[i][j]*ra.v_scales[k][i][j]
+				den[k] = den[k] + ra.v_scales[k][i][j]
+			}
+		}
+		ra.vxyz_raw[k] = num[k] / den[k]
+	}
+}
 
+func (ra *room_anemometer) filterVelocity(coeff float32) {
+	for k := 0; k < 3; k++ {
+		ra.vxyz_filt[k] = ra.vxyz_filt[k]*coeff + ra.vxyz_raw[k]*(1-coeff)
+	}
+}
+
+func (ra *room_anemometer) calibrateVelocity(samps int32) {
+
+	for k := 0; k < 3; k++ {
+		if ra.num_samples == samps {
+			ra.vxyz_offset[k] = ra.vxyz_filt[k]
+		}
+		ra.vxyz_cal[k] = ra.vxyz_filt[k] - ra.vxyz_offset[k]
+	}
+
+}
 
 func Initialize(emit l7g.Emitter) {
 	//We actually do not do any initialization in this implementation, but if
@@ -103,11 +134,11 @@ func Initialize(emit l7g.Emitter) {
 // parameters at https://godoc.org/github.com/immesys/chirp-l7g
 func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	// Define some magic constants for the algorithm
-	magic_count_tx := -4
+	magic_count_tx := -3.125
 
-	fmt.Printf("Device id: %s\n", popHdr.Srcmac)
-	ra,ok := mra[popHdr.Srcmac]
-	if ok==false {
+	//fmt.Printf("Device id: %s\n", popHdr.Srcmac)
+	ra, ok := mra[popHdr.Srcmac]
+	if ok == false {
 		fmt.Printf("No key for: %s, creating new RA\n", popHdr.Srcmac)
 		mra[popHdr.Srcmac] = NewRoomAnemometer()
 		ra = mra[popHdr.Srcmac]
@@ -186,6 +217,9 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		tof := (lerp_idx + float64(magic_count_tx)) / freq * 8
 		_ = tof_est
 		_ = intensity
+		//		fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
+		//		fmt.Printf("tof: %.2f us\n", tof*1000000)
+		//		fmt.Println("freq: ", freq)
 		if toprint {
 
 			//We print these just for fun / debugging, but this is not actually emitting the data
@@ -203,6 +237,11 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 			}
 			fmt.Println(".")
 		}
+		txi := ra.port_to_idx[h.Primary]
+		rxi := ra.port_to_idx[set]
+		ra.tof_matrix[txi][rxi] = float32(tof * 1000000.0)
+		ra.vel_matrix[txi][rxi] = 0.5 * (ra.s_matrix[txi][rxi]/ra.tof_matrix[txi][rxi] -
+			ra.s_matrix[rxi][txi]/ra.tof_matrix[rxi][txi])
 
 		//Append this time of flight to the output data set
 		//For more "real" implementations, this would likely
@@ -214,8 +253,13 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 			Dst: set,
 			Val: tof * 1000000,
 		})
-	} //end for each of the four measurements
 
+	} //end for each of the four measurements
+	ra.num_samples = ra.num_samples + 1
+	ra.cardinalVelocities()
+	ra.filterVelocity(0.99)
+	ra.calibrateVelocity(350)
+	fmt.Printf("%d vel x y z: %.3f, %.3f, %.3f\n", ra.num_samples, ra.vxyz_cal[0], ra.vxyz_cal[1], ra.vxyz_cal[2])
 	// Now we would also emit the velocities. I imagine this would use
 	// the averaged/corrected time of flights that are emitted above
 	// (when they are actually averaged/corrected)
@@ -229,5 +273,5 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	}
 
 	//Emit the data on the SASC bus
-	emit.Data(odata)
+	//	emit.Data(odata)
 }
