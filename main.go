@@ -11,9 +11,134 @@ import (
 
 var lastNotify time.Time
 
+var mra = make(map[string]*room_anemometer)
+
 func main() {
 	lastNotify = time.Now()
-	l7g.RunDPA(Initialize, OnNewData, "mpa", "reference_1_0")
+	l7g.RunDPA(Initialize, OnNewData, "chirpmicro", "reference_1_1")
+}
+
+type room_anemometer struct {
+	//map the port number to the matrix index
+	port_to_idx [4]int32
+	//separation between parts in terms of index in microns
+	s_matrix [4][4]float32
+	//tofs in microseconds
+	tof_matrix [4][4]float32
+	//component velocities in m/s
+	vel_matrix [4][4]float32
+	//scale factors from components to cardinal
+	v_scales [3][4][4]float32
+	//	vy_scales [4][4]float32
+	//	vz_scales [4][4]float32
+	//raw cardinal velocities m/s
+	vxyz_raw [3]float32
+	//stored offset values
+	vxyz_offset [3]float32
+	//calibrated velocities
+	vxyz_cal [3]float32
+	//filtered result, output to application
+	vxyz_filt [3]float32
+	//number of received samples
+	num_samples int32
+	trace_sum   [4]float32
+	trace_filt  [4]float32
+	trace_diff  [4]float32
+	cal_state   int8
+}
+
+func NewRoomAnemometer() *room_anemometer {
+	ra := room_anemometer{}
+	ra.num_samples = 0
+	//initialize port to index according to geometry
+	ra.port_to_idx[0] = 1 //port 0 is B in doc
+	ra.port_to_idx[1] = 3 //port 1 is D
+	ra.port_to_idx[2] = 0 //A
+	ra.port_to_idx[3] = 2 //C
+
+	//initialize s_matrix, tof_matrix.
+	//Other matrixes are already initialized to 0
+	for i := 0; i < 4; i++ {
+		for j := 0; j < 4; j++ {
+			ra.s_matrix[i][j] = 60000.0
+			ra.tof_matrix[i][j] = 174.92
+			if i == j {
+				ra.s_matrix[i][j] = 0.0
+				ra.tof_matrix[i][j] = 1.0e-12 //prevent divide by zero
+			}
+		}
+	}
+	ra.v_scales[0][0][2] = float32(math.Cos(30 * math.Pi / 180.0))
+	ra.v_scales[0][1][2] = float32(math.Cos(30 * math.Pi / 180.0))
+	ra.v_scales[0][0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
+	ra.v_scales[0][1][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
+	ra.v_scales[0][2][3] = float32(-math.Cos(54.74 * math.Pi / 180.0))
+
+	ra.v_scales[1][0][1] = 1.0
+	ra.v_scales[1][0][2] = float32(math.Sin(30 * math.Pi / 180.0))
+	ra.v_scales[1][0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
+	ra.v_scales[1][1][2] = float32(-math.Sin(30 * math.Pi / 180.0))
+	ra.v_scales[1][1][3] = float32(-math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
+
+	ra.v_scales[2][0][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.v_scales[2][1][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+	ra.v_scales[2][2][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
+
+	//flip the matrix across the identity axis
+	for i := 0; i < 4; i++ {
+		for j := i + 1; j < 4; j++ {
+			for k := 0; k < 3; k++ {
+				ra.v_scales[k][j][i] = -ra.v_scales[k][j][i]
+			}
+		}
+	}
+	return &ra
+}
+
+func (ra *room_anemometer) cardinalVelocities() {
+	den := [3]float32{0.0, 0.0, 0.0}
+	num := [3]float32{0.0, 0.0, 0.0}
+	for k := 0; k < 3; k++ {
+		for i := 0; i < 4; i++ {
+			for j := 0; j < 4; j++ {
+				//weighted average, with weights equal to abs value of scale factor
+				num[k] = num[k] + ra.vel_matrix[i][j]*ra.v_scales[k][i][j]*float32(math.Abs(float64(ra.v_scales[k][i][j])))
+				den[k] = den[k] + float32(math.Abs(float64(ra.v_scales[k][i][j])))
+			}
+		}
+		ra.vxyz_raw[k] = num[k] / den[k]
+	}
+}
+
+func (ra *room_anemometer) filterTrace(coeff float32, i uint8) {
+	if ra.num_samples <= 20 {
+		ra.trace_filt[i] = ra.trace_sum[i]
+	} else {
+		ra.trace_filt[i] = ra.trace_filt[i]*coeff + ra.trace_sum[i]*(1-coeff)
+	}
+	ra.trace_diff[i] = ra.trace_sum[i] - ra.trace_filt[i]
+}
+
+func (ra *room_anemometer) filterVelocity(coeff float32) {
+	for k := 0; k < 3; k++ {
+		if ra.num_samples <= 20 {
+			ra.vxyz_filt[k] = ra.vxyz_raw[k]
+		} else {
+			ra.vxyz_filt[k] = ra.vxyz_filt[k]*coeff + ra.vxyz_raw[k]*(1-coeff)
+		}
+
+	}
+}
+
+func (ra *room_anemometer) calibrateVelocity(samps int32) {
+
+	for k := 0; k < 3; k++ {
+		if ra.num_samples == samps {
+			ra.vxyz_offset[k] = ra.vxyz_filt[k]
+		}
+		ra.vxyz_cal[k] = ra.vxyz_filt[k] - ra.vxyz_offset[k]
+	}
+
 }
 
 func Initialize(emit l7g.Emitter) {
@@ -26,7 +151,16 @@ func Initialize(emit l7g.Emitter) {
 // parameters at https://godoc.org/github.com/immesys/chirp-l7g
 func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	// Define some magic constants for the algorithm
-	magic_count_tx := -4
+	magic_count_tx := -3.125
+
+	//fmt.Printf("Device id: %s\n", popHdr.Srcmac)
+	ra, ok := mra[popHdr.Srcmac]
+	if ok == false {
+		fmt.Printf("No key for: %s, creating new RA\n", popHdr.Srcmac)
+		mra[popHdr.Srcmac] = NewRoomAnemometer()
+		ra = mra[popHdr.Srcmac]
+		fmt.Println(ra)
+	}
 
 	// Create our output data set. For this reference implementation,
 	// we emit one TOF measurement for every raw TOF sample (no averaging)
@@ -37,12 +171,14 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		Timestamp: popHdr.Brtime,
 		Sensor:    popHdr.Srcmac,
 	}
-
+	toprint := false
+	isprimary := false
 	// For each of the four measurements in the data set
 	for set := 0; set < 4; set++ {
+		isprimary = false
 		// For now, ignore the data read from the ASIC in TXRX
 		if int(h.Primary) == set {
-			continue
+			isprimary = true
 		}
 
 		// alias the data for readability. This is the 70 byte dataset
@@ -73,65 +209,96 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 				magmax = magsqr[i]
 			}
 		}
+		txi := ra.port_to_idx[h.Primary]
+		rxi := ra.port_to_idx[set]
+		//		fmt.Printf("Tx: %d Rx: %d Tdx: %d Rdx: %d\n", h.Primary, set, txi, rxi)
+		if isprimary == false {
+			//Find the first index to be greater than half the max (quarter the square)
+			quarter := magmax / 4
+			less_idx := 0
+			greater_idx := 0
+			for i := 0; i < 16; i++ {
+				if magsqr[i] < quarter {
+					less_idx = i
+				}
+				if magsqr[i] > quarter {
+					greater_idx = i
+					break
+				}
+			}
 
-		//Find the first index to be greater than half the max (quarter the square)
-		quarter := magmax / 4
-		less_idx := 0
-		greater_idx := 0
-		for i := 0; i < 16; i++ {
-			if magsqr[i] < quarter {
-				less_idx = i
+			//Convert the squares into normal floating point
+			less_val := math.Sqrt(float64(magsqr[less_idx]))
+			greater_val := math.Sqrt(float64(magsqr[greater_idx]))
+			half_val := math.Sqrt(float64(quarter))
+			//CalPulse is in microseconds
+			freq := float64(tof_sf) / 2048 * float64(h.CalRes[set]) / (float64(h.CalPulse) / 1000)
+			//Linearly interpolate the index (the index is related to time of flight because it is regularly sampled)
+			lerp_idx := float64(less_idx) + (half_val-less_val)/(greater_val-less_val)
+			//Fudge the result with magic_count_tx and turn into time of flight
+			tof := (lerp_idx + float64(magic_count_tx)) / freq * 8
+			_ = tof_est
+			_ = intensity
+			//		fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
+			//		fmt.Printf("tof: %.2f us\n", tof*1000000)
+			//		fmt.Println("freq: ", freq)
+			if toprint {
+
+				//We print these just for fun / debugging, but this is not actually emitting the data
+				fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
+				fmt.Println("lerp_idx: ", lerp_idx)
+				fmt.Println("tof_sf: ", tof_sf)
+				fmt.Println("freq: ", freq)
+				fmt.Printf("tof: %.2f us\n", tof*1000000)
+				fmt.Println("intensity: ", intensity)
+				fmt.Println("tof chip estimate: ", tof_est)
+				fmt.Println("tof 50us estimate: ", lerp_idx*50)
+				fmt.Println("data: ")
+				for i := 0; i < 16; i++ {
+					fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
+				}
+				fmt.Println(".")
 			}
-			if magsqr[i] > quarter {
-				greater_idx = i
-				break
+
+			ra.tof_matrix[txi][rxi] = float32(tof * 1000000.0)
+			ra.vel_matrix[txi][rxi] = 0.5 * (ra.s_matrix[txi][rxi]/ra.tof_matrix[txi][rxi] -
+				ra.s_matrix[rxi][txi]/ra.tof_matrix[rxi][txi])
+
+			//Append this time of flight to the output data set
+			//For more "real" implementations, this would likely
+			//be a rolling-window smoothed time of flight. You do not have
+			//to base this value on just the data from this set and
+			//you do not have to emit every time either (downsampling is ok)
+			odata.Tofs = append(odata.Tofs, l7g.TOFMeasure{
+				Src: int(h.Primary),
+				Dst: set,
+				Val: tof * 1000000})
+		} else {
+			//isprimary == true
+			sum := float32(0)
+			for i := 0; i < 16; i++ {
+				sum = sum + float32(magsqr[i])
 			}
+			ra.trace_sum[set] = sum / float32(16.0*32768.0*32768.0)
 		}
 
-		//Convert the squares into normal floating point
-		less_val := math.Sqrt(float64(magsqr[less_idx]))
-		greater_val := math.Sqrt(float64(magsqr[greater_idx]))
-		half_val := math.Sqrt(float64(quarter))
-		//CalPulse is in microseconds
-		freq := float64(tof_sf) / 2048 * float64(h.CalRes[set]) / (float64(h.CalPulse) / 1000)
-		//Linearly interpolate the index (the index is related to time of flight because it is regularly sampled)
-		lerp_idx := float64(less_idx) + (half_val-less_val)/(greater_val-less_val)
-		//Fudge the result with magic_count_tx and turn into time of flight
-		tof := (lerp_idx + float64(magic_count_tx)) / freq * 8
-    _=tof_est
-    _=intensity
-		//We print these just for fun / debugging, but this is not actually emitting the data
-		// fmt.Printf("SEQ %d ASIC %d primary=%d\n", h.Seqno, set, h.Primary)
-		// fmt.Println("lerp_idx: ", lerp_idx)
-		// fmt.Println("tof_sf: ", tof_sf)
-		// fmt.Println("freq: ", freq)
-		// fmt.Printf("tof: %.2f us\n", tof*1000000)
-		// fmt.Println("intensity: ", intensity)
-		// fmt.Println("tof chip estimate: ", tof_est)
-		// fmt.Println("tof 50us estimate: ", lerp_idx*50)
-		// fmt.Println("data: ")
-		// for i := 0; i < 16; i++ {
-		// 	fmt.Printf(" [%2d] %6d + %6di (%.2f)\n", i, qz[i], iz[i], math.Sqrt(float64(magsqr[i])))
-		// }
-		// fmt.Println(".")
-
-		//Append this time of flight to the output data set
-		//For more "real" implementations, this would likely
-		//be a rolling-window smoothed time of flight. You do not have
-		//to base this value on just the data from this set and
-		//you do not have to emit every time either (downsampling is ok)
-		odata.Tofs = append(odata.Tofs, l7g.TOFMeasure{
-			Src: int(h.Primary),
-			Dst: set,
-			Val: tof * 1000000,
-		})
 	} //end for each of the four measurements
+	ra.num_samples = ra.num_samples + 1
+	ra.cardinalVelocities()
+
+	ra.filterVelocity(0.99)
+	ra.filterTrace(0.99, h.Primary)
+	ra.calibrateVelocity(500)
+
+	if popHdr.Srcmac == "b0e7769c5e1c465a" {
+		fmt.Printf("%d, %.3f, %.3f\n", ra.num_samples, ra.vxyz_cal, ra.tof_matrix)
+	}
 
 	// Now we would also emit the velocities. I imagine this would use
 	// the averaged/corrected time of flights that are emitted above
 	// (when they are actually averaged/corrected)
 	// For now, just a placeholder
-	odata.Velocities = append(odata.Velocities, l7g.VelocityMeasure{X: 42, Y: 43, Z: 44})
+	odata.Velocities = append(odata.Velocities, l7g.VelocityMeasure{X: float64(ra.vxyz_cal[0]), Y: float64(ra.vxyz_cal[1]), Z: float64(ra.vxyz_cal[2])})
 
 	// You can also add some extra data here, maybe intermittently like
 	if time.Now().Sub(lastNotify) > 5*time.Second {
