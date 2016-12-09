@@ -45,11 +45,66 @@ type room_anemometer struct {
 	trace_filt  [4]float32
 	trace_diff  [4]float32
 	cal_state   int8
+	//anemometer type, 1 = room, 2 = 6" duct
+	mode int32
+}
+
+func NewDuctAnemometer() *room_anemometer {
+	ra := room_anemometer{}
+	ra.num_samples = 0
+	ra.mode = 2
+	//initialize port to index according to geometry
+	ra.port_to_idx[0] = 2 //port 0 downstream top
+	ra.port_to_idx[1] = 1 //port 1 is upstream bottom
+	ra.port_to_idx[2] = 0 //port 2 is upstream top
+	ra.port_to_idx[3] = 3 //port 3 is downstream bottom
+
+	baserange := 152400.0 //in microns
+	ra.s_matrix[0][1] = baserange
+	ra.s_matrix[0][2] = baserange * float32(math.Sqrt(2))
+	ra.s_matrix[0][3] = baserange * float32(math.Sqrt(3))
+	ra.s_matrix[1][2] = baserange * float32(math.Sqrt(3))
+	ra.s_matrix[1][3] = baserange * float32(math.Sqrt(2))
+	ra.s_matrix[2][3] = baserange
+
+	for i := 0; i < 4; i++ {
+		ra.s_matrix[i][i] = 0.0
+		ra.tof_matrix[i][j] = 1.0e-12
+	}
+
+	for i := 0; i < 4; i++ {
+		for j := i + 1; j < 4; j++ {
+			ra.s_matrix[j][i] = ra.s_matrix[i][j]
+		}
+		for k := 0; k < 4; k++ {
+			ra.tof_matrix[i][j] = ra.s_matrix[i][j] / 343.0
+		}
+	}
+
+	//0 is the top
+	ra.v_scales[0][0][2] = float32(math.Cos(45.0 * math.Pi / 180.0))
+
+	//1 is the bottom
+	ra.v_scales[1][1][3] = float32(math.Cos(45.0 * math.Pi / 180.0))
+	//2 is the diagonal
+	ra.v_scales[2][0][3] = float32(math.Cos(45.0*math.Pi/180.0) * math.Cos(30.0*math.Pi/180.0))
+	ra.v_scales[2][1][2] = float32(math.Cos(45.0*math.Pi/180.0) * math.Cos(30.0*math.Pi/180.0))
+
+	//flip the matrix across the identity axis
+	for i := 0; i < 4; i++ {
+		for j := i + 1; j < 4; j++ {
+			for k := 0; k < 3; k++ {
+				//possibly big bug here
+				ra.v_scales[k][i][j] = -ra.v_scales[k][j][i]
+			}
+		}
+	}
 }
 
 func NewRoomAnemometer() *room_anemometer {
 	ra := room_anemometer{}
 	ra.num_samples = 0
+	ra.mode = 1
 	//initialize port to index according to geometry
 	ra.port_to_idx[0] = 1 //port 0 is B in doc
 	ra.port_to_idx[1] = 3 //port 1 is D
@@ -68,16 +123,16 @@ func NewRoomAnemometer() *room_anemometer {
 			}
 		}
 	}
-	ra.v_scales[0][0][2] = float32(math.Cos(30 * math.Pi / 180.0))
-	ra.v_scales[0][1][2] = float32(math.Cos(30 * math.Pi / 180.0))
+	ra.v_scales[0][0][2] = float32(math.Cos(30.0 * math.Pi / 180.0))
+	ra.v_scales[0][1][2] = float32(math.Cos(30.0 * math.Pi / 180.0))
 	ra.v_scales[0][0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
 	ra.v_scales[0][1][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Sin(60.0*math.Pi/180.0))
 	ra.v_scales[0][2][3] = float32(-math.Cos(54.74 * math.Pi / 180.0))
 
 	ra.v_scales[1][0][1] = 1.0
-	ra.v_scales[1][0][2] = float32(math.Sin(30 * math.Pi / 180.0))
+	ra.v_scales[1][0][2] = float32(math.Sin(30.0 * math.Pi / 180.0))
 	ra.v_scales[1][0][3] = float32(math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
-	ra.v_scales[1][1][2] = float32(-math.Sin(30 * math.Pi / 180.0))
+	ra.v_scales[1][1][2] = float32(-math.Sin(30.0 * math.Pi / 180.0))
 	ra.v_scales[1][1][3] = float32(-math.Cos(54.74*math.Pi/180.0) * math.Cos(60.0*math.Pi/180.0))
 
 	ra.v_scales[2][0][3] = float32(math.Sin(54.74 * math.Pi / 180.0))
@@ -88,7 +143,8 @@ func NewRoomAnemometer() *room_anemometer {
 	for i := 0; i < 4; i++ {
 		for j := i + 1; j < 4; j++ {
 			for k := 0; k < 3; k++ {
-				ra.v_scales[k][j][i] = -ra.v_scales[k][j][i]
+				//possibly big bug here
+				ra.v_scales[k][i][j] = -ra.v_scales[k][j][i]
 			}
 		}
 	}
@@ -157,7 +213,12 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	ra, ok := mra[popHdr.Srcmac]
 	if ok == false {
 		fmt.Printf("No key for: %s, creating new RA\n", popHdr.Srcmac)
-		mra[popHdr.Srcmac] = NewRoomAnemometer()
+		if 0 {
+
+		} else {
+			mra[popHdr.Srcmac] = NewRoomAnemometer()
+		}
+
 		ra = mra[popHdr.Srcmac]
 		fmt.Println(ra)
 	}
