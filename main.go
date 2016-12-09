@@ -7,15 +7,25 @@ import (
 	"time"
 
 	l7g "github.com/immesys/chirp-l7g"
+	"github.com/immesys/wd"
 )
 
 var lastNotify time.Time
 
 var mra = make(map[string]*room_anemometer)
 
+const Vendor = "chirpmicro"
+const Version = "ref_1_2"
+
 func main() {
 	lastNotify = time.Now()
-	l7g.RunDPA(Initialize, OnNewData, "chirpmicro", "reference_1_1")
+	l7g.RunDPA(Initialize, OnNewData, Vendor, Version)
+	go func() {
+		for {
+			wd.Kick("410.anem.alg."+Vendor+"_"+Version+".alive", 60)
+			time.Sleep(5 * time.Second)
+		}
+	}()
 }
 
 type room_anemometer struct {
@@ -153,6 +163,14 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	// Define some magic constants for the algorithm
 	magic_count_tx := -3.125
 
+	//Room anemometers have build numbers like 110, 120, 130
+	//duct anemometers have build numbers like 115, 125, 135
+	if h.Build%10 == 5 {
+		//This is a duct anemometer, and this algorithm is not yet updated to
+		//deal with that
+		fmt.Printf("dropping duct anemometer data\n")
+		return
+	}
 	//fmt.Printf("Device id: %s\n", popHdr.Srcmac)
 	ra, ok := mra[popHdr.Srcmac]
 	if ok == false {
@@ -161,7 +179,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		ra = mra[popHdr.Srcmac]
 		fmt.Println(ra)
 	}
-
+	wd.RLKick(5*time.Second, "410.anem.alg."+Vendor+"_"+Version+".ingress."+popHdr.Srcmac, 60)
 	// Create our output data set. For this reference implementation,
 	// we emit one TOF measurement for every raw TOF sample (no averaging)
 	// so the timestamp is simply the raw timestamp obtained from the
