@@ -219,6 +219,7 @@ func Initialize(emit l7g.Emitter) {
 // parameters at https://godoc.org/github.com/immesys/chirp-l7g
 func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	// Define some magic constants for the algorithm
+	duct := false
 	magic_count_tx := -3.125
 
 	//	fmt.Printf(".\n")
@@ -228,14 +229,22 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		//This is a duct anemometer, and this algorithm is not yet updated to
 		//deal with that
 		//		fmt.Printf("dropping duct anemometer data\n")
-		return
+		//corect magic_count_tx to account for the 13 dropped samples in the duct trace
+		magic_count_tx = magic_count_tx - 13.0
+		duct = true
 	}
 
 	//fmt.Printf("Device id: %s\n", popHdr.Srcmac)
+
 	ra, ok := mra[popHdr.Srcmac]
 	if ok == false {
 		fmt.Printf("No key for: %s, creating new RA\n", popHdr.Srcmac)
-		mra[popHdr.Srcmac] = NewRoomAnemometer()
+		if duct {
+			mra[popHdr.Srcmac] = NewDuctAnemometer()
+		} else {
+			mra[popHdr.Srcmac] = NewRoomAnemometer()
+		}
+
 		ra = mra[popHdr.Srcmac]
 		fmt.Println(ra)
 	}
@@ -365,9 +374,9 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	ra.num_samples = ra.num_samples + 1
 	ra.cardinalVelocities()
 
-	ra.filterVelocity(0.99)
-	ra.filterTrace(0.99, h.Primary)
-	ra.calibrateVelocity(500)
+	ra.filterVelocity(0.90)
+	ra.filterTrace(0.90, h.Primary)
+	ra.calibrateVelocity(50)
 
 	if popHdr.Srcmac == "b0e7769c5e1c465a" {
 		fmt.Printf("%d, %.3f, %.3f, %.3f\n", ra.num_samples, ra.vxyz_cal[0], ra.vxyz_cal[1], ra.vxyz_cal[2])
