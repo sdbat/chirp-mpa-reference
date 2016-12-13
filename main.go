@@ -7,17 +7,26 @@ import (
 	"time"
 
 	l7g "github.com/immesys/chirp-l7g"
+	"github.com/immesys/wd"
 )
 
 var lastNotify time.Time
 
 var mra = make(map[string]*room_anemometer)
 
+const Vendor = "chirpmicro"
+const Version = "ref_1_4"
+
 func main() {
 	lastNotify = time.Now()
 
-	l7g.RunDPA(Initialize, OnNewData, "chirpmicro", "reference_1_3")
-
+	l7g.RunDPA(Initialize, OnNewData, Vendor, Version)
+	go func() {
+		for {
+			wd.Kick("410.anem.alg."+Vendor+"_"+Version+".alive", 60)
+			time.Sleep(5 * time.Second)
+		}
+	}()
 }
 
 type room_anemometer struct {
@@ -230,6 +239,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		ra = mra[popHdr.Srcmac]
 		fmt.Println(ra)
 	}
+	wd.RLKick(5*time.Second, "410.anem.alg."+Vendor+"_"+Version+".ingress."+popHdr.Srcmac, 60)
 
 	// Create our output data set. For this reference implementation,
 	// we emit one TOF measurement for every raw TOF sample (no averaging)
@@ -359,9 +369,9 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	ra.filterTrace(0.99, h.Primary)
 	ra.calibrateVelocity(500)
 
-	//	if popHdr.Srcmac == "b0e7769c5e1c465a" {
-	//		fmt.Printf("%d, %.3f, %.3f\n", ra.num_samples, ra.vxyz_cal, ra.tof_matrix)
-	//	}
+	if popHdr.Srcmac == "b0e7769c5e1c465a" {
+		fmt.Printf("%d, %.3f, %.3f, %.3f\n", ra.num_samples, ra.vxyz_cal[0], ra.vxyz_cal[1], ra.vxyz_cal[2])
+	}
 
 	// Now we would also emit the velocities. I imagine this would use
 	// the averaged/corrected time of flights that are emitted above
