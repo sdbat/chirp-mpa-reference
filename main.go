@@ -23,7 +23,7 @@ func main() {
 	go func() {
 		for {
 			wd.Kick("410.anem.alg."+Vendor+"_"+Version+".alive", 60)
-			time.Sleep(5 * time.Second)
+			time.Sleep(10 * time.Second)
 		}
 	}()
 }
@@ -69,7 +69,7 @@ func NewDuctAnemometer() *room_anemometer {
 	ra.port_to_idx[2] = 0 //port 2 is upstream top
 	ra.port_to_idx[3] = 3 //port 3 is downstream bottom
 
-	baserange := 152400.0 //in microns
+	baserange := float32(152400.0) //in microns
 	ra.s_matrix[0][1] = baserange
 	ra.s_matrix[0][2] = baserange * float32(math.Sqrt(2))
 	ra.s_matrix[0][3] = baserange * float32(math.Sqrt(3))
@@ -79,7 +79,7 @@ func NewDuctAnemometer() *room_anemometer {
 
 	for i := 0; i < 4; i++ {
 		ra.s_matrix[i][i] = 0.0
-		ra.tof_matrix[i][j] = 1.0e-12
+		ra.tof_matrix[i][i] = 1.0e-12
 	}
 
 	for i := 0; i < 4; i++ {
@@ -87,7 +87,7 @@ func NewDuctAnemometer() *room_anemometer {
 			ra.s_matrix[j][i] = ra.s_matrix[i][j]
 		}
 		for k := 0; k < 4; k++ {
-			ra.tof_matrix[i][j] = ra.s_matrix[i][j] / 343.0
+			ra.tof_matrix[i][k] = ra.s_matrix[i][k] / 343.0
 		}
 	}
 
@@ -109,6 +109,7 @@ func NewDuctAnemometer() *room_anemometer {
 			}
 		}
 	}
+	return &ra
 }
 
 func NewRoomAnemometer() *room_anemometer {
@@ -219,6 +220,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	// Define some magic constants for the algorithm
 	magic_count_tx := -3.125
 
+	fmt.Printf(".\n")
 	//Room anemometers have build numbers like 110, 120, 130
 	//duct anemometers have build numbers like 115, 125, 135
 	if h.Build%10 == 5 {
@@ -231,15 +233,11 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	ra, ok := mra[popHdr.Srcmac]
 	if ok == false {
 		fmt.Printf("No key for: %s, creating new RA\n", popHdr.Srcmac)
-		if 0 {
-
-		} else {
-			mra[popHdr.Srcmac] = NewRoomAnemometer()
-		}
-
+		mra[popHdr.Srcmac] = NewRoomAnemometer()
 		ra = mra[popHdr.Srcmac]
 		fmt.Println(ra)
 	}
+
 	wd.RLKick(5*time.Second, "410.anem.alg."+Vendor+"_"+Version+".ingress."+popHdr.Srcmac, 60)
 	// Create our output data set. For this reference implementation,
 	// we emit one TOF measurement for every raw TOF sample (no averaging)
@@ -387,4 +385,5 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 
 	//Emit the data on the SASC bus
 	emit.Data(odata)
+	fmt.Printf(".\n")
 }
