@@ -106,7 +106,7 @@ func NewDuctAnemometer() *room_anemometer {
 		for j := i + 1; j < 4; j++ {
 			for k := 0; k < 3; k++ {
 				//possibly big bug here
-				ra.v_scales[k][i][j] = -ra.v_scales[k][j][i]
+				ra.v_scales[k][j][i] = -ra.v_scales[k][i][j]
 			}
 		}
 	}
@@ -221,7 +221,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	// Define some magic constants for the algorithm
 	duct := false
 	magic_count_tx := -3.125
-
+	threshold := uint64(1400 * 1400)
 	//	fmt.Printf(".\n")
 	//Room anemometers have build numbers like 110, 120, 130
 	//duct anemometers have build numbers like 115, 125, 135
@@ -230,7 +230,7 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		//deal with that
 		//		fmt.Printf("dropping duct anemometer data\n")
 		//corect magic_count_tx to account for the 13 dropped samples in the duct trace
-		magic_count_tx = magic_count_tx - 13.0
+		magic_count_tx = magic_count_tx + 13.0
 		duct = true
 	}
 
@@ -261,6 +261,10 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	}
 	toprint := false
 	isprimary := false
+	if popHdr.Srcmac == "99706f326a21465a" {
+		toprint = false
+	}
+
 	// For each of the four measurements in the data set
 	for set := 0; set < 4; set++ {
 		isprimary = false
@@ -293,8 +297,12 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 		magmax := uint64(0)
 		for i := 0; i < 16; i++ {
 			magsqr[i] = uint64(int64(qz[i])*int64(qz[i]) + int64(iz[i])*int64(iz[i]))
-			if magsqr[i] > magmax {
-				magmax = magsqr[i]
+			if magsqr[i] > threshold {
+				if magsqr[i] < magmax {
+					break
+				} else {
+					magmax = magsqr[i]
+				}
 			}
 		}
 		txi := ra.port_to_idx[h.Primary]
@@ -374,11 +382,11 @@ func OnNewData(popHdr *l7g.L7GHeader, h *l7g.ChirpHeader, emit l7g.Emitter) {
 	ra.num_samples = ra.num_samples + 1
 	ra.cardinalVelocities()
 
-	ra.filterVelocity(0.90)
+	ra.filterVelocity(0.99)
 	ra.filterTrace(0.90, h.Primary)
-	ra.calibrateVelocity(50)
+	ra.calibrateVelocity(500)
 
-	if popHdr.Srcmac == "b0e7769c5e1c465a" {
+	if popHdr.Srcmac == "99706f326a21465a" {
 		fmt.Printf("%d, %.3f, %.3f, %.3f\n", ra.num_samples, ra.vxyz_cal[0], ra.vxyz_cal[1], ra.vxyz_cal[2])
 	}
 
